@@ -43,7 +43,8 @@ char *perftask(char *con, char **log_array, int *nextlog); 	//PERFORM PRIMARY TA
 app_id this_id;
 
 int main(void) {
-	
+
+	sleep(1);	
 	//DECLARE ESSENTIAL VARIABLES AND ALLOCATE MEMORY FOR TOPLEVEL ARRAY
 	char **logarr, *empty_container;
 	pthread_t send, get;
@@ -64,6 +65,10 @@ int main(void) {
 	caps.is_mod = 0;
 	caps.aid = this_id;
 	caps.log = perftask(empty_container, logarr, &inc);	//ALLOCATE MEMORY FOR ARRAYS IN TOPLEVEL ARRAY ONLY WHEN NECESSARY
+	if ((caps.message = malloc(sizeof(char) * 120)) == NULL) {
+		perror("malloc err");
+		exit(1);
+	}
 	caps.sock = sockserv(ssock, "127.0.0.1", &sai, &spai);	//SERVES UP A FUNCTIONAL SOCKET
 	caps.spai = spai;
 	memset(&ssock, 0, sizeof(ssock));	//ENSURE THAT SSOCK IS AN EMPTY CONTAINER
@@ -81,18 +86,26 @@ int main(void) {
 	capg.spai = kaip;
 	
 	//BEGIN AND CONTROL THREADS
-	//pthread_create(&send, NULL, sendlog, &caps);
+	pthread_create(&send, NULL, sendlog, &caps);
 	pthread_create(&get, NULL, getlog, &capg);
-	//pthread_join(send, NULL);
+	pthread_join(send, NULL);
 	pthread_join(get, NULL);
 	if (strcpy(*(logarr + inc - 1), capg.log) == NULL) {
 		perror("strcpy err");
 		exit(1);
 	}
 	printf("%s\n", capg.message);
-	printf("%s", *(logarr + inc - 1));	//NEWLINE IS TYPICALLY ALREADY DEFINED IN LOG MESSAGE; FIX LATER
+	printf("%s\n", *(logarr + inc - 1));	//NEWLINE IS TYPICALLY ALREADY DEFINED IN LOG MESSAGE; FIX LATER
 
 	//FREE ALLOCATED MEMORY AND CONCLUDE PROGRAM
+	if (close(caps.sock) == -1) {
+		perror("sclose err");
+		exit(1);
+	}
+	if (close(capg.sock) == -1) {
+		perror("sclose err");
+		exit(1);
+	}
 	free(capg.log);
 	free(capg.message);
 	for (int i = 0; i < inc; i++)	//FREE ONLY THOSE LOWLEVEL ARRAYS THAT NEED IT
@@ -218,7 +231,7 @@ char *perftask(char *log, char **logs, int *nptr) {
 		exit(1);
 	}
 	start = clock();
-	system("ping -c 1 www.worcesterschools.org > ping_info");
+	system("ping -c 1 www.google.com > ping_info");
 	if ((checkf = fopen("ping_info", "r")) == NULL)
 	       log = "Failed execution of ping task on target 'www.google.com'.";	
 	end = clock();
