@@ -13,17 +13,24 @@
 #include <signal.h>
 #include <time.h>
 #include <pthread.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 #define PORT "6666"
 #define MAXLOGS 20
 #define MAXLOG_LEN 100
 #define TEMP 2
 
-enum datatype {SENDLOG, GETLOG};
+enum datatype {SENDLOG, GETLOG, MAP};
 
 typedef unsigned int app_id;
 typedef struct addrinfo saddrinfo;
 typedef struct sockaddr_storage sstorage;
+typedef struct mapping {
+	char *ipaddr;	//FELLOW IP ADDRESS
+	app_id aid;	//FELLOW APP_ID
+	struct mapping *next;	//NEXT NODE
+} mapping;
 typedef struct {
 	enum datatype s_id;	//ENUM IDENTIFIER THAT DETERMINES WHETHER THE STRUCT CONTAINS SENDLOG DATA OR GETLOG DATA; MAY NOT BE NULL
 	int is_mod;	//BOOLEAN THAT IS SET TO 'TRUE' IF THE STRUCT IS MODIFIED BY THE MODIFYING AGENT; INFORMS THE PROGRAM WHETHER OR NOT THE STRUCT IS BEING SENT BACK FROM A THREAD; MAY NOT BE NULL
@@ -31,36 +38,60 @@ typedef struct {
 	app_id aid;	//APP_ID IDENTIFIER; EITHER EXPORTED TO OUTBOUND FELLOW IN SENDLOG, OR RETRIEVED FROM INBOUND FELLOW IN GETLOG; MAY BE NULL
 	char *log;	//BUFFER TO CONTAIN LOG DATA; MAY BE NULL
 	char *message;	//BUFFER TO CONTAIN MESSAGE DATA; MAY BE NULL
+	saddrinfo sai;
 	saddrinfo *spai;	//LINKED LIST ADDRINFO FOR SOCKET TRANSMISSION; MAY BE NULL
 } capsule;
 
 void *sendlog(void *args);	//THREAD FUNCTION TO SEND LOGS TO NEAREST FELLOW
 void *getlog(void *args);	//THREAD FUNCTION TO RETRIEVE INBOUND LOGS
 int logalloc(char **log_array, int nextlog);	//CALLED FROM PERFTASK TO ASSIGN NEW VALUE TO NEXTLOG POINTER; DYNAMICALLY ALLOCATES MEMORY TO NEXT AVAILABLE LOGSPACE
-int sockserv(int sock, char *hostname, saddrinfo *hints, saddrinfo **res);	//SERVES UP A FUNCTIONAL TCP SOCKET GIVEN A FELLOW HOSTNAME AND USABLE ADDRINFO STRUCTS; RETURNS NULL ON ERROR
+int sockserv(int sock, int opts, char *hostname, saddrinfo *hints, saddrinfo **res);	//SERVES UP A FUNCTIONAL TCP SOCKET GIVEN A FELLOW HOSTNAME AND USABLE ADDRINFO STRUCTS; RETURNS NULL ON ERROR
 char *perftask(char *con, char **log_array, int *nextlog); 	//PERFORM PRIMARY TASK; RETURNS TASKLOG
+char *getmyhostname();	//OBTAINS THIS FELLOW'S HOSTNAME TO BE FED INTO GET_APPID
+mapping *chart(capsule *cap, int nargs, char *hostnames[]); 	//DETERMINES WHETHER OR NOT PASSED FELLOW IPS RESOLVE TO ACTIVE FELLOWS; RETURNS MAPPING LL FILLED OUT WITH SAID INFO; MOST IMPORTANT PART OF THE ENTIRE SYSTEM
+app_id get_appid(char *hostname);	//GIVEN IP ADDRESS, RETURNS CORRESPONDING APP_ID 
 
 app_id this_id;
 
-int main(void) {
+int main(int argc, char *argv[]) {
 
-	sleep(1);	
+	sleep(1);
+	if (argc < 2) {
+		printf("%s\n", "Improper format. Please provide at least one fellow IP Address to map onto.");
+		exit(1);
+	}	
 	//DECLARE ESSENTIAL VARIABLES AND ALLOCATE MEMORY FOR TOPLEVEL ARRAY
 	char **logarr, *empty_container;
 	pthread_t send, get;
-	capsule caps, capg;	//WILL FIRST BE PASSED TO SEND THREAD, CONTAINING NECESSARY DATA FOR FELLOW COMMUNICATION; WILL THEN BE MODIFIED BY SEND THREAD AND RETURNED WITH NECESSARY INFORMATION FOR MAIN FUNC
+	mapping *themap, *dummy;
+	capsule mcap, caps, capg;	//WILL FIRST BE PASSED TO SEND THREAD, CONTAINING NECESSARY DATA FOR FELLOW COMMUNICATION; WILL THEN BE MODIFIED BY SEND THREAD AND RETURNED WITH NECESSARY INFORMATION FOR MAIN FUNC
 	saddrinfo sai, *spai, kai, *kaip;	//ONE PAIR FOR L_SOCK & A_SOCK; ONE PAIR FOR C_SOCK
 	int inc, ssock;
 	inc = 0;
-	this_id = (app_id) getpid() * 3;
+	this_id = get_appid(getmyhostname());
 	printf("%s%u%c\n", "APP ID is ", this_id, '.');
-	
+
 	if ((logarr = (char **) malloc(sizeof(char *) * MAXLOGS)) == NULL) {	//ALLOCATE MEMORY TO THE ARRAY OF ARRAYS
 		perror("MAJOR malloc err");
 		exit(1);
 	}
 	
 	//FILL OUT CAPSULES 
+	mcap.s_id = MAP;
+	mcap.is_mod = 0;
+	mcap.aid = this_id;
+	mcap.log = NULL;
+	mcap.message = NULL;
+	mcap.sock = -1;		//SINCE MULTIPLE SOCKETS WILL HAVE TO BE CREATED, KEEP MCAP SOCK OBSOLETE UNTIL MAPPING()
+	if ((themap = chart(&mcap, argc, argv)) == NULL) {
+		perror("mapit err");
+		exit(1);
+	}
+	/*for (int i = 0; i < argc - 1; i++) {	//PRINT MAPPED FELLOWS' ADDRESSES
+		printf("%s\n", themap -> ipaddr);
+		printf("%u\n", themap -> aid);
+		themap = themap -> next;
+	}*/
 	caps.s_id = SENDLOG;
 	caps.is_mod = 0;
 	caps.aid = this_id;
@@ -69,7 +100,7 @@ int main(void) {
 		perror("malloc err");
 		exit(1);
 	}
-	caps.sock = sockserv(ssock, "127.0.0.1", &sai, &spai);	//SERVES UP A FUNCTIONAL SOCKET
+	caps.sock = sockserv(ssock, 0, themap -> ipaddr, &sai, &spai);	//SERVES UP A FUNCTIONAL SOCKET; MAPPING MUST BE FILLED OUT TO WORK
 	caps.spai = spai;
 	memset(&ssock, 0, sizeof(ssock));	//ENSURE THAT SSOCK IS AN EMPTY CONTAINER
 	capg.s_id = GETLOG;
@@ -82,7 +113,7 @@ int main(void) {
 		perror("malloc err");
 		exit(1);
 	}
-	capg.sock = sockserv(ssock, NULL, &kai, &kaip);
+	capg.sock = sockserv(ssock, 1, NULL, &kai, &kaip);
 	capg.spai = kaip;
 	
 	//BEGIN AND CONTROL THREADS
@@ -121,10 +152,11 @@ void *sendlog(void *capdata) {
 	char buf[120];
 	capsule *cap = (capsule *) capdata;
 	saddrinfo *mspai = cap -> spai;
-	if (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
+	while (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
 		perror("con err");
-		exit(1);
+		sleep(1);
 	}
+	printf("%s\n", "Connected to host.");
 	if (send(cap -> sock, cap -> log, strlen(cap -> log) + 1, 0) == -1) {
 		perror("send err");
 		exit(1);
@@ -158,10 +190,11 @@ void *getlog(void *capdata) {
 		perror("listen err");
 		exit(1);
 	}
-	if ((a_sock = accept(cap -> sock, (struct sockaddr *) &crate, &crate_len)) == -1) {
+	while ((a_sock = accept(cap -> sock, (struct sockaddr *) &crate, &crate_len)) == -1) {
 		perror("accept err");
-		exit(1);
+		sleep(1);
 	}
+	printf("%s\n", "Connection accepted.");
 	if (recv(a_sock, buf, sizeof(buf), 0) == -1) {
 		perror("recv err");
 		exit(1);
@@ -201,13 +234,14 @@ int logalloc(char **logs, int n) {
 
 }
 
-int sockserv(int sock, char *host, saddrinfo *sai, saddrinfo **spai) {
+int sockserv(int sock, int opts, char *host, saddrinfo *sai, saddrinfo **spai) {
 
 	int temp = 1;
 	memset(sai, 0, sizeof(*sai));
 	sai -> ai_family = AF_INET;
 	sai -> ai_socktype = SOCK_STREAM;
-	sai -> ai_flags = AI_PASSIVE;
+	if (opts == 1)
+		sai -> ai_flags = AI_PASSIVE;
 	getaddrinfo(host, PORT, sai, spai);
 	if ((sock = socket(sai -> ai_family, sai -> ai_socktype, sai -> ai_protocol)) == -1) {
 		perror("sock err");
@@ -242,5 +276,88 @@ char *perftask(char *log, char **logs, int *nptr) {
 	}
 	*nptr = logalloc(logs, *nptr);
 	return log;
+
+}
+
+char *getmyhostname() {		//CODE COPIED FROM https://www.geekpage.jp/en/programming/linux-network/get-ipaddr.php WITH A FEW MODIFICATIONS
+
+	int fd;
+ 	struct ifreq ifr;
+ 	fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+ 	/* I want to get an IPv4 IP address */
+ 	ifr.ifr_addr.sa_family = AF_INET;
+
+ 	/* I want IP address attached to "eth0" */
+ 	strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);
+
+ 	ioctl(fd, SIOCGIFADDR, &ifr);
+
+ 	close(fd);
+
+ 	return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+
+}
+
+mapping *chart(capsule *cap, int n, char *argv[]) {		//GODDAMN BEAUTIFUL	
+
+	mapping *head, *swap, *point;
+	int temp = 1;
+	if ((point = malloc(sizeof(mapping))) == NULL) {
+		perror("malloc err");
+		exit(1);
+	}
+	head = point;
+	cap -> sai.ai_family = AF_INET;
+	cap -> sai.ai_socktype = SOCK_STREAM;
+	saddrinfo msai = cap -> sai;
+	saddrinfo *mspai = cap -> spai;	//DEREFERENCE SPAI INTO AN EASIER FORM
+	for (int i = 1; i < n; i++) {		//CREATES LINKED LIST OF ARBITRARY LENGTH USING A SWAP STRUCT
+		getaddrinfo(argv[i], PORT, &msai, &mspai);
+		if ((cap -> sock = socket(mspai -> ai_family, mspai -> ai_socktype, mspai -> ai_protocol)) == -1) {
+			perror("sock err");
+			exit(1);
+		}
+		if (setsockopt(cap -> sock, SOL_SOCKET, SO_REUSEADDR, &temp, sizeof(int)) == -1) {
+            		perror("setsock err");
+           		exit(1);
+        	}
+		if (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
+			perror("Cannot connect.");
+			point -> ipaddr = argv[i];
+			point -> aid = get_appid(argv[i]);
+		} else {
+			point -> ipaddr = NULL;
+		}
+		if (close(cap -> sock) == -1) {
+			perror("sock close err");
+			exit(1);
+		}
+		freeaddrinfo(mspai);
+		if ((point -> next = malloc(sizeof(mapping))) == NULL) {
+			perror("malloc err");
+			exit(1);
+		}
+		swap = point;
+		point = swap -> next;
+	}
+	point = NULL;		//MARK THE END OF THE LIST
+	return head;
+    
+}
+
+app_id get_appid(char *ip) {	//IPV4 ADDR TO APP_ID CONVERTER
+
+	char c = 'a';	//PLACEHOLDER CHAR
+	int i = 0, test;
+	app_id fin = 0;
+	while (c != '\0' && c != '\n') {
+		c = *(ip + i);
+		test = c - '0';
+		if (test == 1 || test == 2 || test == 3 || test == 4 || test == 5 || test == 6 || test == 7 || test == 8 || test == 9)
+			fin += test;
+		i++;
+	}
+	return fin;
 
 }
