@@ -1,0 +1,10 @@
+Program begins, accepting arbitrary number of IP Address args
+Sleep to allow for fellows activation; make sure at least one IP Address was provided
+logarr (two-dimensional array; stores log strings), empty_container (malleable empty vessel)
+pthreads (send thread and get thread)
+themap (core mapping struct)
+mcap, caps, capg (capsules for starter mapping, send thread, get thread)
+sai + spai (getaddrinfo pair 1), kai + kaip (getaddrinfo pair 2)
+inc (pointer to next free log string), ssock (empty sock fd)
+Get hostname and convert to app_id; assign to program app_id; print
+Allocate memory to top-level of logarr 2D array
