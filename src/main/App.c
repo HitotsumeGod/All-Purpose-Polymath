@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}	
 	//DECLARE ESSENTIAL VARIABLES AND ALLOCATE MEMORY FOR TOPLEVEL ARRAY
-	char **logarr, *empty_container;
+	char **logarr, *task, *empty_container;
 	pthread_t send, get;
 	mapping *themap, *dummy;
 	capsule mcap, caps, capg;	//WILL FIRST BE PASSED TO SEND THREAD, CONTAINING NECESSARY DATA FOR FELLOW COMMUNICATION; WILL THEN BE MODIFIED BY SEND THREAD AND RETURNED WITH NECESSARY INFORMATION FOR MAIN FUNC
@@ -73,6 +73,10 @@ int main(int argc, char *argv[]) {
 
 	if ((logarr = (char **) malloc(sizeof(char *) * MAXLOGS)) == NULL) {	//ALLOCATE MEMORY TO THE ARRAY OF ARRAYS
 		perror("MAJOR malloc err");
+		exit(1);
+	}
+	if ((task = malloc(sizeof(char) * 9)) == NULL) {
+		perror("malloc err");
 		exit(1);
 	}
 	
@@ -92,10 +96,11 @@ int main(int argc, char *argv[]) {
 		printf("%u\n", themap -> aid);
 		themap = themap -> next;
 	}*/
+	task = perftask(empty_container, logarr, &inc);
 	caps.s_id = SENDLOG;
 	caps.is_mod = 0;
 	caps.aid = this_id;
-	caps.log = perftask(empty_container, logarr, &inc);	//ALLOCATE MEMORY FOR ARRAYS IN TOPLEVEL ARRAY ONLY WHEN NECESSARY
+	caps.log = task;
 	if ((caps.message = malloc(sizeof(char) * 120)) == NULL) {
 		perror("malloc err");
 		exit(1);
@@ -137,6 +142,7 @@ int main(int argc, char *argv[]) {
 		perror("sclose err");
 		exit(1);
 	}
+	free(task);
 	free(capg.log);
 	free(capg.message);
 	for (int i = 0; i < inc; i++)	//FREE ONLY THOSE LOWLEVEL ARRAYS THAT NEED IT
@@ -149,14 +155,24 @@ int main(int argc, char *argv[]) {
 
 void *sendlog(void *capdata) {
 	
-	char buf[120];
+	char buf[120], ipinfo[16];
+	size_t *inc_size;
 	capsule *cap = (capsule *) capdata;
 	saddrinfo *mspai = cap -> spai;
 	while (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
 		perror("con err");
 		sleep(1);
 	}
-	printf("%s\n", "Connected to host.");
+	printf("%s\n", "MAILMAN: Connected to host.");
+	if (recv(cap -> sock, inc_size, sizeof(int), 0) == -1) {
+		perror("mailman recv err");
+		exit(1);
+	}
+	printf("zc%zu\n", *inc_size);
+	if (recv(cap -> sock, ipinfo, *inc_size, 0) == -1) {
+		perror("mailman recv err");
+		exit(1);
+	}
 	if (send(cap -> sock, cap -> log, strlen(cap -> log) + 1, 0) == -1) {
 		perror("send err");
 		exit(1);
@@ -175,51 +191,67 @@ void *sendlog(void *capdata) {
 
 void *getlog(void *capdata) {
 
-	char buf[120], *mes = "Got log from fellow ", *fin_mes;
+	char buf[120], ipinfo[16], *mes = "MAILBOX: Got log from fellow ", *fin_mes;
 	int a_sock;
+	size_t *info_size; 
 	sstorage crate;
 	socklen_t crate_len = sizeof(crate);
 	capsule *cap = (capsule *) capdata;
 	saddrinfo *mspai = cap -> spai;
 	app_id their_id;
+	if ((info_size = malloc(sizeof(size_t))) == NULL) {
+		perror("mailbox malloc err");
+		exit(1);
+	}
+	*info_size = strlen(getmyhostname());
+	strcpy(ipinfo, getmyhostname());
 	if (bind(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
-		perror("bind err");
+		perror("mailbox bind err");
 		exit(1);
 	}
 	if (listen(cap -> sock, 0) == -1) {
-		perror("listen err");
+		perror("mailbox listen err");
 		exit(1);
 	}
 	while ((a_sock = accept(cap -> sock, (struct sockaddr *) &crate, &crate_len)) == -1) {
-		perror("accept err");
+		perror("mailbox accept err");
 		sleep(1);
 	}
-	printf("%s\n", "Connection accepted.");
+	if (send(cap -> sock, info_size, sizeof(size_t), 0) == -1) {
+		perror("mailbox send 1err");
+		exit(1);
+	}
+	if (send(cap -> sock, ipinfo, *info_size, 0) == -1) {
+		perror("mailbox send 2err");
+		exit(1);
+	}
+	printf("%s\n", "MAILBOX: Connection accepted.");
 	if (recv(a_sock, buf, sizeof(buf), 0) == -1) {
-		perror("recv err");
+		perror("mailbox recv err");
 		exit(1);
 	}
 	cap -> aid = their_id;
 	if (strcpy(cap -> log, buf) == NULL) {
-		perror("strcpy err");
+		perror("mailbox strcpy err");
 		exit(1);
 	}
 	if ((fin_mes = malloc(sizeof(char) * 30)) == NULL) {
-		perror("malloc err");
+		perror("mailbox malloc err");
 		exit(1);
 	}
 	if (snprintf(fin_mes, 30, "%s%u%c", mes, cap -> aid, '.') == -1) {
-		perror("string formatting err");
+		perror("mailbox string formatting err");
 		exit(1);
 	}
 	if (strcpy(cap -> message, fin_mes) == NULL) {
-		perror("strcpy err");
+		perror("mailbox strcpy err");
 		exit(1);
 	}
 	if (close(a_sock) == -1) {
-		perror("sock close err");
+		perror("mailbox sock close err");
 		exit(1);
 	}
+	free(info_size);
 	free(fin_mes);
 
 }
@@ -323,7 +355,7 @@ mapping *chart(capsule *cap, int n, char *argv[]) {		//GODDAMN BEAUTIFUL
            		exit(1);
         	}
 		if (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
-			perror("Cannot connect.");
+			//perror("Cannot connect.");
 			point -> ipaddr = argv[i];
 			point -> aid = get_appid(argv[i]);
 		} else {
