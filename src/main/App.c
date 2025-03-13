@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <ifaddrs.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -13,8 +14,6 @@
 #include <signal.h>
 #include <time.h>
 #include <pthread.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
 
 #define PORT "6666"
 #define MAXLOGS 20
@@ -71,15 +70,6 @@ int main(int argc, char *argv[]) {
 	this_id = get_appid(getmyhostname());
 	printf("%s%u%c\n", "APP ID is ", this_id, '.');
 
-	if ((logarr = (char **) malloc(sizeof(char *) * MAXLOGS)) == NULL) {	//ALLOCATE MEMORY TO THE ARRAY OF ARRAYS
-		perror("MAJOR malloc err");
-		exit(1);
-	}
-	if ((task = malloc(sizeof(char) * 9)) == NULL) {
-		perror("malloc err");
-		exit(1);
-	}
-	
 	//FILL OUT CAPSULES 
 	mcap.s_id = MAP;
 	mcap.is_mod = 0;
@@ -96,6 +86,15 @@ int main(int argc, char *argv[]) {
 		printf("%u\n", themap -> aid);
 		themap = themap -> next;
 	}*/
+	while (1) {
+	if ((logarr = (char **) malloc(sizeof(char *) * MAXLOGS)) == NULL) {	//ALLOCATE MEMORY TO THE ARRAY OF ARRAYS
+		perror("MAJOR malloc err");
+		exit(1);
+	}
+	if ((task = malloc(sizeof(char) * 9)) == NULL) {
+		perror("malloc err");
+		exit(1);
+	}
 	task = perftask(empty_container, logarr, &inc);
 	caps.s_id = SENDLOG;
 	caps.is_mod = 0;
@@ -149,6 +148,7 @@ int main(int argc, char *argv[]) {
 		free(*(logarr + i));
 	free(logarr);	//FREE TOPLEVEL ARRAY, ENSURING THAT THE 2D LOG CONSTRUCT IS PROPERLY UNDONE WITHOUT LEAKS
 	freeaddrinfo(spai);
+	}
 	return 0;
 
 }
@@ -326,24 +326,26 @@ char *perftask(char *log, char **logs, int *nptr) {
 
 }
 
-char *getmyhostname() {		//CODE COPIED FROM https://www.geekpage.jp/en/programming/linux-network/get-ipaddr.php WITH A FEW MODIFICATIONS
+char *getmyhostname() {
 
-	int fd;
- 	struct ifreq ifr;
- 	fd = socket(AF_INET, SOCK_DGRAM, 0);
-
- 	/* I want to get an IPv4 IP address */
- 	ifr.ifr_addr.sa_family = AF_INET;
-
- 	/* I want IP address attached to "eth0" */
- 	strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);
-
- 	ioctl(fd, SIOCGIFADDR, &ifr);
-
- 	close(fd);
-
- 	return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
-
+	struct ifaddrs *my_interface, *pointer;
+	struct sockaddr_in addressin;
+	if (getifaddrs(&my_interface) == -1) {
+		perror("interface grab err");
+		exit(EXIT_FAILURE);
+	}
+	if ((pointer = malloc(sizeof my_interface)) == NULL) {
+		perror("malloc err");
+		exit(EXIT_FAILURE);
+	}
+	memcpy(pointer, my_interface, sizeof my_interface);
+	freeifaddrs(my_interface);
+	while (pointer != NULL) {
+		if (strcmp("eth0", pointer -> ifa_name) == 0 || strcmp("wlan0", pointer -> ifa_name) == 0)  
+			return pointer -> ifa_addr -> sa_data;		//RETURN FIRST LEGITIMATE ADDRESS
+		pointer = pointer -> ifa_next;
+	}
+	return NULL;	//NO INTERFACES DETECTED
 }
 
 mapping *chart(capsule *cap, int n, char *argv[]) {		//GODDAMN BEAUTIFUL	
@@ -397,6 +399,10 @@ app_id get_appid(char *ip) {	//IPV4 ADDR TO APP_ID CONVERTER
 	char c = 'a';	//PLACEHOLDER CHAR
 	int i = 0, test;
 	app_id fin = 0;
+	if (ip == NULL) {
+		perror("appid err");
+		exit(EXIT_FAILURE);
+	}
 	while (c != '\0' && c != '\n') {
 		c = *(ip + i);
 		test = c - '0';
