@@ -160,7 +160,7 @@ void *sendlog(void *capdata) {
 	capsule *cap = (capsule *) capdata;
 	saddrinfo *mspai = cap -> spai;
 	while (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
-		perror("con err");
+		//perror("con err");
 		sleep(1);
 	}
 	printf("%s\n", "MAILMAN: Connected to host.");
@@ -217,11 +217,12 @@ void *getlog(void *capdata) {
 		perror("mailbox accept err");
 		sleep(1);
 	}
-	if (send(cap -> sock, info_size, sizeof(size_t), 0) == -1) {
+	printf("%s\n", "MAILBOX accepted connection!");
+	if (send(a_sock, info_size, sizeof(size_t), 0) == -1) {
 		perror("mailbox send 1err");
 		exit(1);
 	}
-	if (send(cap -> sock, ipinfo, *info_size, 0) == -1) {
+	if (send(a_sock, ipinfo, *info_size, 0) == -1) {
 		perror("mailbox send 2err");
 		exit(1);
 	}
@@ -355,7 +356,6 @@ mapping *chart(capsule *cap, int n, char *argv[]) {		//GODDAMN BEAUTIFUL
            		exit(1);
         	}
 		if (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
-			//perror("Cannot connect.");
 			point -> ipaddr = argv[i];
 			point -> aid = get_appid(argv[i]);
 		} else {
