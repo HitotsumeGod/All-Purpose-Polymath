@@ -155,10 +155,14 @@ int main(int argc, char *argv[]) {
 
 void *sendlog(void *capdata) {
 	
-	char buf[120], ipinfo[16];
+	char buf[120], *ipinfo;
 	size_t *inc_size;
 	capsule *cap = (capsule *) capdata;
 	saddrinfo *mspai = cap -> spai;
+	if ((inc_size = malloc(sizeof(size_t))) == NULL) {
+		perror("malloc err");
+		exit(EXIT_FAILURE);
+	}
 	while (connect(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
 		//perror("con err");
 		sleep(1);
@@ -168,11 +172,17 @@ void *sendlog(void *capdata) {
 		perror("mailman recv err");
 		exit(1);
 	}
-	printf("zc%zu\n", *inc_size);
+	printf("Inc Size is %zu\n", *inc_size);
+	if ((ipinfo = malloc(sizeof(char) * (*inc_size + 1))) == NULL) {
+		perror("malloc err");
+		exit(EXIT_FAILURE);
+	}
 	if (recv(cap -> sock, ipinfo, *inc_size, 0) == -1) {
 		perror("mailman recv err");
 		exit(1);
 	}
+	*(ipinfo + *inc_size + 1) = '\0';
+	printf("Fellow IP is : %s\n", ipinfo);
 	if (send(cap -> sock, cap -> log, strlen(cap -> log) + 1, 0) == -1) {
 		perror("send err");
 		exit(1);
@@ -186,12 +196,13 @@ void *sendlog(void *capdata) {
 		exit(1);
 	}
 	cap -> is_mod = 1;
+	free(inc_size);
 
 }
 
 void *getlog(void *capdata) {
 
-	char buf[120], ipinfo[16], *mes = "MAILBOX: Got log from fellow ", *fin_mes;
+	char buf[120], *ipinfo, *mes = "MAILBOX: Got log from fellow ", *fin_mes;
 	int a_sock;
 	size_t *info_size; 
 	sstorage crate;
@@ -204,6 +215,10 @@ void *getlog(void *capdata) {
 		exit(1);
 	}
 	*info_size = strlen(getmyhostname());
+	if ((ipinfo = malloc(sizeof(char) * *info_size)) == NULL) {
+		perror("malloc err");
+		exit(EXIT_FAILURE);
+	}
 	strcpy(ipinfo, getmyhostname());
 	if (bind(cap -> sock, mspai -> ai_addr, mspai -> ai_addrlen) == -1) {
 		perror("mailbox bind err");
@@ -217,7 +232,7 @@ void *getlog(void *capdata) {
 		perror("mailbox accept err");
 		sleep(1);
 	}
-	printf("%s\n", "MAILBOX accepted connection!");
+	printf("%s\n", "MAILBOX: Connection accepted.");
 	if (send(a_sock, info_size, sizeof(size_t), 0) == -1) {
 		perror("mailbox send 1err");
 		exit(1);
@@ -226,7 +241,6 @@ void *getlog(void *capdata) {
 		perror("mailbox send 2err");
 		exit(1);
 	}
-	printf("%s\n", "MAILBOX: Connection accepted.");
 	if (recv(a_sock, buf, sizeof(buf), 0) == -1) {
 		perror("mailbox recv err");
 		exit(1);
