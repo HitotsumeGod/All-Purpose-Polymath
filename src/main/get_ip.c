@@ -21,10 +21,8 @@ char *getmyhostname() {
         memcpy(pointer, my_interface, sizeof my_interface);
         freeifaddrs(my_interface);
         while (pointer != NULL) {
-                if (strcmp("eth0", pointer -> ifa_name) == 0 || strcmp("wlan0", pointer -> ifa_name) == 0 || strcmp("wlp2s0", pointer -> ifa_name) == 0) {
-                        if (*(pointer -> ifa_addr -> sa_data) == '1')
-                                return pointer -> ifa_addr -> sa_data;          //RETURN FIRST LEGITIMATE ADDRESS
-                }
+                if (strcmp("eth0", pointer -> ifa_name) == 0 || strcmp("wlan0", pointer -> ifa_name) == 0 || strcmp("wlp2s0", pointer -> ifa_name) == 0) 
+                	return pointer -> ifa_addr -> sa_data;          //RETURN FIRST LEGITIMATE ADDRESS
                 pointer = pointer -> ifa_next;
         }
         return NULL;    //NO INTERFACES DETECTED

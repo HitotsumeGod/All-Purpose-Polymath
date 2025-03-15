@@ -8,7 +8,6 @@
 #define PORT "6666"
 #define MAXLOGS 20
 #define MAXLOG_LEN 100
-#define TEMP 2
 
 enum datatype {SENDLOG, GETLOG, MAP};
 

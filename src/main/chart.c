@@ -4,13 +4,15 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <unistd.h>
-
 #include "app_util.h"
 
 mapping *chart(capsule *cap, int n, char *argv[]) {             //GODDAMN BEAUTIFUL
 
         mapping *head, *swap, *point;
-        int temp = 1;
+	saddrinfo msai, *mspai;
+        int temp, errcode;
+
+	temp = 1;
         if ((point = malloc(sizeof(mapping))) == NULL) {
                 perror("malloc err");
                 exit(1);
@@ -18,10 +20,14 @@ mapping *chart(capsule *cap, int n, char *argv[]) {             //GODDAMN BEAUTI
         head = point;
         cap -> sai.ai_family = AF_INET;
         cap -> sai.ai_socktype = SOCK_STREAM;
-        saddrinfo msai = cap -> sai;
-        saddrinfo *mspai = cap -> spai; //DEREFERENCE SPAI INTO AN EASIER FORM
+	cap -> sai.ai_flags = AI_PASSIVE;
+        msai = cap -> sai;
+        mspai = cap -> spai; //DEREFERENCE SPAI INTO AN EASIER FORM
         for (int i = 1; i < n; i++) {           //CREATES LINKED LIST OF ARBITRARY LENGTH USING A SWAP STRUCT
-                getaddrinfo(argv[i], PORT, &msai, &mspai);
+                if ((errcode = getaddrinfo(argv[i], PORT, &msai, &mspai)) != 0) {
+			printf("getaddrinfo error : %s\n", gai_strerror(errcode));
+			exit(EXIT_FAILURE);
+		}
                 if ((cap -> sock = socket(mspai -> ai_family, mspai -> ai_socktype, mspai -> ai_protocol)) == -1) {
                         perror("sock err");
                         exit(1);

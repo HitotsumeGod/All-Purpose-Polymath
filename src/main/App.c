@@ -24,6 +24,7 @@ int main(int argc, char *argv[]) {
 	capsule mcap, caps, capg;	//WILL FIRST BE PASSED TO SEND THREAD, CONTAINING NECESSARY DATA FOR FELLOW COMMUNICATION; WILL THEN BE MODIFIED BY SEND THREAD AND RETURNED WITH NECESSARY INFORMATION FOR MAIN FUNC
 	saddrinfo sai, *spai, kai, *kaip;	//ONE PAIR FOR L_SOCK & A_SOCK; ONE PAIR FOR C_SOCK
 	int inc, ssock;
+
 	inc = 0;
 	this_id = get_appid(getmyhostname());
 	printf("%s%u%c\n", "APP ID is ", this_id, '.');
